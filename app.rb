@@ -27,7 +27,7 @@ post '/tasky' do
       event_data = request_data["event"]
 
       # script should only run if direct message was not initiated by a bot
-      if !event_data["bot_id"]
+      if !event_data["bot_id"] && !event_data["previous_message"]
         puts "it's an event"
         # tasker variable is set to user who sent message
         tasker = event_data["user"]
@@ -58,6 +58,30 @@ post '/tasky' do
            body:  {
               "token" => ENV['SLACK_API_TOKEN'],
               "text": "<@#{tasker}> has asked you to #{task}",
+              "attachments": [
+                {
+                  "text": "Have you completed the task?",
+                  "fallback": "Have you completed the task?",
+                  "callback_id": "completion",
+                  "color": "#3AA3E3",
+                  "attachment_type": "default",
+                  "actions": [
+                    {
+                      "name": "completed",
+                      "text": "Task Completed",
+                      "type": "button",
+                      "value": "completed"
+                    },
+                    {
+                      "name": "incomplete",
+                      "text": "Cannot Complete Task",
+                      "type": "button",
+                      "value": "incomplete"
+                    }
+                  ]
+                }
+              ].to_json,
+
               "channel" => "#{taskee_channel}",
               "username" => "Tasky",
               "as_user" => "false"
@@ -87,14 +111,22 @@ post '/tasky' do
             },
          :headers => { 'Content-Type' => 'application/x-www-form-urlencoded' }
        )
-
      end
+
   end
 
 end
 
-# When button is clicked re: task completion, Slack posts to /button
-# post '/button' do
-#   request_data = JSON.parse(request.params["payload"])
-#   "got it!"
-# end
+
+post '/button' do
+  payload = JSON.parse(request["payload"])
+  case payload["actions"][0]["value"]
+    when "completed"
+      puts "task was completed"
+      message = "Completion confirmation sent"
+    when "incomplete"
+      puts "task cannot be completed"
+      message = "Rejection of task as not completable sent"
+  end
+  message
+end
