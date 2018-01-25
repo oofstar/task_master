@@ -120,13 +120,43 @@ end
 
 post '/button' do
   payload = JSON.parse(request["payload"])
+  original_message = payload["original_message"]["text"].sub(" has asked you to", "")
+  taskee = payload["user"]["id"]
+  task_arr = original_message.split
+  tasker = task_arr.shift
+  task = task_arr.join(' ')
+
+  tasker_response = JSON.parse(HTTParty.post("https://slack.com/api/im.open",
+    body: {
+      "token" => ENV['SLACK_API_TOKEN'],
+      "user" => "#{tasker.delete('<' '@' '>')}"
+    },
+    headers: { 'Content-Type' => 'application/x-www-form-urlencoded' }
+  ).to_s)
+
+  tasker_channel = tasker_response["channel"]["id"]
+
   case payload["actions"][0]["value"]
     when "completed"
+      task_answer = "<@#{taskee}> has completed the task you assigned: #{task}."
       puts "task was completed"
-      message = "Completion confirmation sent"
+      message = "Completion confirmation sent to #{tasker}."
+
     when "incomplete"
+      task_answer = "<@#{taskee}> cannot complete the task you assigned: #{task}"
       puts "task cannot be completed"
-      message = "Rejection of task as not completable sent"
+      message = "Rejection of task as not completable sent to #{tasker}."
   end
+
+  HTTParty.post("https://slack.com/api/chat.postMessage",
+     body: {
+        "token" => ENV['SLACK_API_TOKEN'],
+        "text" => task_answer,
+        "channel" => "#{tasker_channel}",
+        "username" => "Tasky",
+        "as_user" => "false"
+      },
+   :headers => { 'Content-Type' => 'application/x-www-form-urlencoded' }
+  )
   message
 end
