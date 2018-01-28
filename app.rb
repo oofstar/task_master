@@ -104,7 +104,16 @@ post '/tasky' do
         HTTParty.post("https://slack.com/api/chat.postMessage",
            body:  {
               "token": ENV['SLACK_API_TOKEN'],
-              "text": "#{task} assigned to #{taskee}.",
+              "text": "Task Sent!",
+              "attachments": [
+                {
+                  "text": "#{task} assigned to #{taskee}.",
+                  "fallback": "#{task} assigned to #{taskee}.",
+                  "callback_id": "completion",
+                  "color": "#3AA3E3",
+                  "attachment_type": "default",
+                }
+              ].to_json,
               "channel": "#{tasker_channel}",
               "username": "Tasky",
               "as_user": "false"
@@ -119,6 +128,7 @@ end
 
 # when button is pressed, slack posts to /button
 post '/button' do
+  # binding.pry
   # parse payload from slack
   payload = JSON.parse(request["payload"])
 
@@ -143,13 +153,17 @@ post '/button' do
   case payload["actions"][0]["value"]
     # if button is pressed for task completion, variables set here:
     when "completed"
+      completion = "Task Complete!"
       task_answer = "<@#{taskee}> has completed the task you assigned: #{task}."
       puts "task was completed"
+      color = "#79A687"
       message = "Completion confirmation sent to #{tasker}."
     # if button is pressed that task cannot be completed, variables set here:
     when "incomplete"
+      completion = "Task Cannot Be Completed!"
       task_answer = "<@#{taskee}> cannot complete the task you assigned: #{task}"
       puts "task cannot be completed"
+      color = "#ff0000"
       message = "Rejection of task as not completable sent to #{tasker}."
   end
 
@@ -157,7 +171,16 @@ post '/button' do
   HTTParty.post("https://slack.com/api/chat.postMessage",
      body: {
         "token": ENV['SLACK_API_TOKEN'],
-        "text": task_answer,
+        "text": completion,
+        "attachments": [
+          {
+            "text": task_answer,
+            "fallback": task_answer,
+            "callback_id": "completion",
+            "color": color,
+            "attachment_type": "default",
+          }
+        ].to_json,
         "channel": "#{tasker_channel}",
         "username": "Tasky",
         "as_user": "false"
