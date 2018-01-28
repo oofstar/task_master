@@ -26,8 +26,8 @@ post '/tasky' do
       # trim down request to necessary event data
       event_data = request_data["event"]
 
-      # script should only run if direct message was not initiated by a bot
-      if !event_data["bot_id"]
+      # script should only run if direct message was not initiated by a bot and if event wasn't actually changing of message.
+      if !event_data["bot_id"] && !event_data["previous_message"]
         puts "it's an event"
         # tasker variable is set to user who sent message
         tasker = event_data["user"]
@@ -45,10 +45,10 @@ post '/tasky' do
         # call to Web API to determine correct channel id for DM to taskee
         taskee_response = JSON.parse(HTTParty.post("https://slack.com/api/im.open",
           body: {
-            "token" => ENV['SLACK_API_TOKEN'],
-            "user" => "#{taskee.delete('<' '@' '>')}"
+            "token": ENV['SLACK_API_TOKEN'],
+            "user": "#{taskee.delete('<' '@' '>')}"
           },
-          headers: { 'Content-Type' => 'application/x-www-form-urlencoded' }
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         ).to_s)
 
         taskee_channel = taskee_response["channel"]["id"]
@@ -56,22 +56,46 @@ post '/tasky' do
         # Web API call to send message to taskee notifying them of task assignment
         HTTParty.post("https://slack.com/api/chat.postMessage",
            body:  {
-              "token" => ENV['SLACK_API_TOKEN'],
+              "token": ENV['SLACK_API_TOKEN'],
               "text": "<@#{tasker}> has asked you to #{task}",
-              "channel" => "#{taskee_channel}",
-              "username" => "Tasky",
-              "as_user" => "false"
+              "attachments": [
+                {
+                  "text": "Have you completed #{task}?",
+                  "fallback": "Have you completed #{task}?",
+                  "callback_id": "completion",
+                  "color": "#3AA3E3",
+                  "attachment_type": "default",
+                  "actions": [
+                    {
+                      "name": "completed",
+                      "text": "Task Completed",
+                      "type": "button",
+                      "value": "completed"
+                    },
+                    {
+                      "name": "incomplete",
+                      "text": "Cannot Complete Task",
+                      "type": "button",
+                      "value": "incomplete"
+                    }
+                  ]
+                }
+              ].to_json,
+
+              "channel": "#{taskee_channel}",
+              "username": "Tasky",
+              "as_user": "false"
             },
-         :headers => { 'Content-Type' => 'application/x-www-form-urlencoded' }
+         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         )
 
         # call to Web API to determine correct channel id for DM to tasker. channel from original request is not the same
         tasker_response = JSON.parse(HTTParty.post("https://slack.com/api/im.open",
           body: {
-            "token" => ENV['SLACK_API_TOKEN'],
-            "user" => "#{tasker}"
+            "token": ENV['SLACK_API_TOKEN'],
+            "user": "#{tasker}"
           },
-          headers: { 'Content-Type' => 'application/x-www-form-urlencoded' }
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         ).to_s)
 
         tasker_channel = tasker_response["channel"]["id"]
@@ -79,22 +103,67 @@ post '/tasky' do
         # Web API call to send message to tasker notifying them task was assigned
         HTTParty.post("https://slack.com/api/chat.postMessage",
            body:  {
-              "token" => ENV['SLACK_API_TOKEN'],
-              "text" => "#{task} assigned to #{taskee}.",
-              "channel" => "#{tasker_channel}",
-              "username" => "Tasky",
-              "as_user" => "false"
+              "token": ENV['SLACK_API_TOKEN'],
+              "text": "#{task} assigned to #{taskee}.",
+              "channel": "#{tasker_channel}",
+              "username": "Tasky",
+              "as_user": "false"
             },
-         :headers => { 'Content-Type' => 'application/x-www-form-urlencoded' }
+         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
        )
-
      end
+
   end
 
 end
 
-# When button is clicked re: task completion, Slack posts to /button
-# post '/button' do
-#   request_data = JSON.parse(request.params["payload"])
-#   "got it!"
-# end
+# when button is pressed, slack posts to /button
+post '/button' do
+  # parse payload from slack
+  payload = JSON.parse(request["payload"])
+
+  # original message is used to get tasker ID and task text
+  original_message = payload["original_message"]["text"].sub(" has asked you to", "")
+  taskee = payload["user"]["id"]
+  task_arr = original_message.split
+  tasker = task_arr.shift
+  task = task_arr.join(' ')
+
+  # im.open request sent to slack to determine correct channel id for tasker
+  tasker_response = JSON.parse(HTTParty.post("https://slack.com/api/im.open",
+    body: {
+      "token": ENV['SLACK_API_TOKEN'],
+      "user": "#{tasker.delete('<' '@' '>')}"
+    },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  ).to_s)
+
+  tasker_channel = tasker_response["channel"]["id"]
+
+  case payload["actions"][0]["value"]
+    # if button is pressed for task completion, variables set here:
+    when "completed"
+      task_answer = "<@#{taskee}> has completed the task you assigned: #{task}."
+      puts "task was completed"
+      message = "Completion confirmation sent to #{tasker}."
+    # if button is pressed that task cannot be completed, variables set here:
+    when "incomplete"
+      task_answer = "<@#{taskee}> cannot complete the task you assigned: #{task}"
+      puts "task cannot be completed"
+      message = "Rejection of task as not completable sent to #{tasker}."
+  end
+
+  # confirmation or rejection message sent to tasker
+  HTTParty.post("https://slack.com/api/chat.postMessage",
+     body: {
+        "token": ENV['SLACK_API_TOKEN'],
+        "text": task_answer,
+        "channel": "#{tasker_channel}",
+        "username": "Tasky",
+        "as_user": "false"
+      },
+   headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  )
+  # return value replaces message in taskees DM channel
+  message
+end
